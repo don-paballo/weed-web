@@ -422,8 +422,9 @@
       const dt = Math.min(clock.getDelta(), 0.05);
       const t = clock.getElapsedTime();
 
-      // Movement
-      const speed = baseSpeed * speedMul;
+      // Movement (scaled by dt * 60 to be frame-rate independent, baselined at 60fps)
+      const dtScale = dt * 60;
+      const speed = baseSpeed * speedMul * dtScale;
       let moveX = 0, moveZ = 0;
       if (input.up)    moveZ -= speed;
       if (input.down)  moveZ += speed;
@@ -433,6 +434,9 @@
       const isMoving = moveX !== 0 || moveZ !== 0;
 
       if (isMoving) {
+        // Normalize diagonal movement to prevent ~41% speed boost
+        const len = Math.sqrt(moveX * moveX + moveZ * moveZ);
+        if (len > speed) { moveX = moveX / len * speed; moveZ = moveZ / len * speed; }
         charAngle.current = Math.atan2(moveX, moveZ);
         charGroup.rotation.y = charAngle.current;
       }
@@ -449,8 +453,8 @@
         isGrounded = false;
       }
 
-      velY -= gravity;
-      charGroup.position.y += velY;
+      velY -= gravity * dtScale;
+      charGroup.position.y += velY * dtScale;
 
       if (charGroup.position.y <= terrY) {
         charGroup.position.y = terrY;
@@ -513,8 +517,9 @@
       // Animate particles
       for (let i = particles.length - 1; i >= 0; i--) {
         const p = particles[i];
-        p.mesh.position.add(p.vel);
-        p.vel.y -= 0.005;
+        const scaledVel = p.vel.clone().multiplyScalar(dtScale);
+        p.mesh.position.add(scaledVel);
+        p.vel.y -= 0.005 * dtScale;
         p.life -= dt * 1.5;
         p.mesh.material.opacity = p.life;
         p.mesh.material.transparent = true;
