@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Feature World: Random Chaos Edition</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #000; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    #gameCanvas { display: block; width: 100%; height: 100%; }
+
+    /* Notification */
+    #notification {
+      position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+      padding: 12px 28px; border-radius: 12px; font-size: 18px; font-weight: bold;
+      color: #fff; background: rgba(0,0,0,0.7); border: 2px solid #0ff;
+      box-shadow: 0 0 20px rgba(0,255,255,0.4);
+      opacity: 0; transition: opacity 0.4s; pointer-events: none; z-index: 100;
+      text-align: center; white-space: nowrap;
+    }
+    #notification.show { opacity: 1; }
+
+    /* D-Pad */
+    #dpad {
+      position: fixed; bottom: 30px; left: 30px; z-index: 50;
+      display: grid; grid-template-columns: 60px 60px 60px; grid-template-rows: 60px 60px 60px; gap: 4px;
+    }
+    .dpad-btn {
+      width: 60px; height: 60px; border: none; border-radius: 12px; font-size: 24px;
+      background: rgba(255,255,255,0.15); color: #fff; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      backdrop-filter: blur(4px); user-select: none; touch-action: none;
+      transition: background 0.15s;
+    }
+    .dpad-btn:active, .dpad-btn.pressed { background: rgba(255,255,255,0.4); }
+    #btn-up    { grid-column: 2; grid-row: 1; }
+    #btn-left  { grid-column: 1; grid-row: 2; }
+    #btn-right { grid-column: 3; grid-row: 2; }
+    #btn-down  { grid-column: 2; grid-row: 3; }
+
+    /* Jump button */
+    #btn-jump {
+      position: fixed; bottom: 50px; right: 40px; z-index: 50;
+      width: 80px; height: 80px; border: none; border-radius: 50%; font-size: 16px;
+      font-weight: bold; color: #fff; cursor: pointer;
+      background: rgba(255,80,80,0.5); backdrop-filter: blur(4px);
+      user-select: none; touch-action: none; transition: background 0.15s;
+    }
+    #btn-jump:active, #btn-jump.pressed { background: rgba(255,80,80,0.8); }
+
+    /* HUD */
+    #hud {
+      position: fixed; top: 10px; left: 10px; color: #fff; font-size: 14px;
+      z-index: 50; pointer-events: none; text-shadow: 1px 1px 3px #000;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+
+  <div id="notification"></div>
+
+  <div id="hud">
+    <div id="hud-speed">Speed: 1.0x</div>
+    <div id="hud-effects">Effects: none</div>
+  </div>
+
+  <div id="dpad">
+    <button class="dpad-btn" id="btn-up">&#9650;</button>
+    <button class="dpad-btn" id="btn-left">&#9664;</button>
+    <button class="dpad-btn" id="btn-right">&#9654;</button>
+    <button class="dpad-btn" id="btn-down">&#9660;</button>
+  </div>
+  <button id="btn-jump">JUMP</button>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+    }
+  }
+  </script>
+  <script type="module">
+    import * as THREE from 'three';
+
+    /* ───────── RENDERER / SCENE / CAMERA ───────── */
+    const canvas = document.getElementById('gameCanvas');
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.Fog(0x87ceeb, 80, 250);
+
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500);
+
+    /* ───────── LIGHTS ───────── */
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    scene.add(ambientLight);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
+    dirLight.position.set(50, 80, 50);
+    dirLight.castShadow = true;
+    dirLight.shadow.mapSize.set(1024, 1024);
+    dirLight.shadow.camera.near = 0.5;
+    dirLight.shadow.camera.far = 200;
+    dirLight.shadow.camera.left = -60;
+    dirLight.shadow.camera.right = 60;
+    dirLight.shadow.camera.top = 60;
+    dirLight.shadow.camera.bottom = -60;
+    scene.add(dirLight);
+
+    /* ───────── SKY ───────── */
+    scene.background = new THREE.Color(0x87ceeb);
+
+    /* ───────── CLOUDS ───────── */
+    const clouds = [];
+    function createCloud(x, y, z) {
+      const group = new THREE.Group();
+      const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0 });
+      const count = 4 + Math.floor(Math.random() * 4);
+      for (let i = 0; i < count; i++) {
+        const r = 3 + Math.random() * 4;
+        const geo = new THREE.SphereGeometry(r, 12, 12);
+        const m = new THREE.Mesh(geo, mat);
+        m.position.set(Math.random() * 8 - 4, Math.random() * 2, Math.random() * 8 - 4);
+        m.scale.y = 0.5 + Math.random() * 0.3;
+        group.add(m);
+      }
+      group.position.set(x, y, z);
+      scene.add(group);
+      clouds.push(group);
+    }
+    for (let i = 0; i < 18; i++) {
+      createCloud(Math.random() * 300 - 150, 40 + Math.random() * 20, Math.random() * 300 - 150);
+    }
+
+    /* ───────── TERRAIN ───────── */
+    const terrainSize = 300;
+    const terrainSeg = 128;
+    const terrainGeo = new THREE.PlaneGeometry(terrainSize, terrainSize, terrainSeg, terrainSeg);
+    terrainGeo.rotateX(-Math.PI / 2);
+    const posAttr = terrainGeo.attributes.position;
+    for (let i = 0; i < posAttr.count; i++) {
+      const x = posAttr.getX(i);
+      const z = posAttr.getZ(i);
+      const y = Math.sin(x * 0.05) * 2 + Math.cos(z * 0.07) * 2 + Math.sin((x + z) * 0.03) * 3;
+      posAttr.setY(i, y);
+    }
+    terrainGeo.computeVertexNormals();
+    const terrainMat = new THREE.MeshStandardMaterial({ color: 0x4a8c3f, roughness: 0.9, flatShading: true });
+    const terrain = new THREE.Mesh(terrainGeo, terrainMat);
+    terrain.receiveShadow = true;
+    scene.add(terrain);
+
+    function getTerrainHeight(x, z) {
+      return Math.sin(x * 0.05) * 2 + Math.cos(z * 0.07) * 2 + Math.sin((x + z) * 0.03) * 3;
+    }
+
+    /* ───────── CHARACTER ───────── */
+    const charGroup = new THREE.Group();
+
+    // Body (brown)
+    const bodyGeo = new THREE.BoxGeometry(1.0, 1.4, 0.6);
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    body.position.y = 1.2;
+    body.castShadow = true;
+    charGroup.add(body);
+
+    // Head (green)
+    const headGeo = new THREE.SphereGeometry(0.45, 16, 16);
+    const headMat = new THREE.MeshStandardMaterial({ color: 0x22cc44 });
+    const head = new THREE.Mesh(headGeo, headMat);
+    head.position.y = 2.2;
+    head.castShadow = true;
+    charGroup.add(head);
+
+    // Eyes
+    const eyeGeo = new THREE.SphereGeometry(0.08, 8, 8);
+    const eyeMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
+    const pupilGeo = new THREE.SphereGeometry(0.04, 8, 8);
+    const pupilMat = new THREE.MeshStandardMaterial({ color: 0x000000 });
+    for (const side of [-1, 1]) {
+      const eye = new THREE.Mesh(eyeGeo, eyeMat);
+      eye.position.set(side * 0.15, 2.28, 0.38);
+      charGroup.add(eye);
+      const pupil = new THREE.Mesh(pupilGeo, pupilMat);
+      pupil.position.set(side * 0.15, 2.28, 0.44);
+      charGroup.add(pupil);
+    }
+
+    // Arms
+    const armGeo = new THREE.BoxGeometry(0.25, 0.9, 0.25);
+    const armMat = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
+    const leftArm = new THREE.Mesh(armGeo, armMat);
+    leftArm.position.set(-0.65, 1.2, 0);
+    leftArm.castShadow = true;
+    charGroup.add(leftArm);
+    const rightArm = new THREE.Mesh(armGeo, armMat);
+    rightArm.position.set(0.65, 1.2, 0);
+    rightArm.castShadow = true;
+    charGroup.add(rightArm);
+
+    // Legs
+    const legGeo = new THREE.BoxGeometry(0.3, 0.8, 0.3);
+    const legMat = new THREE.MeshStandardMaterial({ color: 0x654321 });
+    const leftLeg = new THREE.Mesh(legGeo, legMat);
+    leftLeg.position.set(-0.25, 0.4, 0);
+    leftLeg.castShadow = true;
+    charGroup.add(leftLeg);
+    const rightLeg = new THREE.Mesh(legGeo, legMat);
+    rightLeg.position.set(0.25, 0.4, 0);
+    rightLeg.castShadow = true;
+    charGroup.add(rightLeg);
+
+    charGroup.position.set(0, getTerrainHeight(0, 0), 0);
+    scene.add(charGroup);
+
+    /* ───────── COLLECTIBLE OBJECTS ───────── */
+    const collectibles = [];
+    const effectTypes = [
+      { name: 'Speed Boost!',   color: 0xff4400, icon: '⚡', apply: () => { speedMul = 2.0; setTimeout(() => { speedMul = 1.0; showNotification('Speed returned to normal'); }, 5000); } },
+      { name: 'Slow Down!',     color: 0x4444ff, icon: '🐌', apply: () => { speedMul = 0.4; setTimeout(() => { speedMul = 1.0; showNotification('Speed returned to normal'); }, 5000); } },
+      { name: 'Invisibility!',  color: 0xcccccc, icon: '👻', apply: () => { setCharVisible(false); setTimeout(() => { setCharVisible(true); showNotification('You are visible again'); }, 4000); } },
+      { name: 'Giant Mode!',    color: 0xff00ff, icon: '🦖', apply: () => { charGroup.scale.set(2,2,2); setTimeout(() => { charGroup.scale.set(1,1,1); showNotification('Back to normal size'); }, 5000); } },
+      { name: 'Tiny Mode!',     color: 0x00ffff, icon: '🐜', apply: () => { charGroup.scale.set(0.4,0.4,0.4); setTimeout(() => { charGroup.scale.set(1,1,1); showNotification('Back to normal size'); }, 5000); } },
+      { name: 'Super Jump!',    color: 0xffff00, icon: '🚀', apply: () => { jumpPower = 0.35; setTimeout(() => { jumpPower = 0.18; showNotification('Jump power returned to normal'); }, 6000); } },
+      { name: 'Disco Mode!',    color: 0xff88ff, icon: '🪩', apply: () => { discoMode = true; setTimeout(() => { discoMode = false; scene.background = new THREE.Color(0x87ceeb); showNotification('Disco over!'); }, 5000); } },
+      { name: 'Low Gravity!',   color: 0xaaffaa, icon: '🌙', apply: () => { gravity = 0.004; setTimeout(() => { gravity = 0.012; showNotification('Gravity restored'); }, 6000); } },
+    ];
+
+    const geomFactories = [
+      () => new THREE.BoxGeometry(1.2, 1.2, 1.2),
+      () => new THREE.SphereGeometry(0.7, 16, 16),
+      () => new THREE.ConeGeometry(0.7, 1.4, 8),
+      () => new THREE.TorusGeometry(0.5, 0.2, 8, 16),
+      () => new THREE.OctahedronGeometry(0.7),
+      () => new THREE.DodecahedronGeometry(0.7),
+      () => new THREE.TetrahedronGeometry(0.8),
+      () => new THREE.CylinderGeometry(0.4, 0.6, 1.2, 8),
+    ];
+
+    function spawnCollectible(x, z) {
+      const eff = effectTypes[Math.floor(Math.random() * effectTypes.length)];
+      const geo = geomFactories[Math.floor(Math.random() * geomFactories.length)]();
+      const mat = new THREE.MeshStandardMaterial({
+        color: eff.color,
+        emissive: eff.color,
+        emissiveIntensity: 0.3,
+        roughness: 0.4,
+        metalness: 0.3,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      const ty = getTerrainHeight(x, z);
+      mesh.position.set(x, ty + 1.5, z);
+      mesh.castShadow = true;
+      scene.add(mesh);
+
+      // Glow ring
+      const ringGeo = new THREE.TorusGeometry(1.0, 0.05, 8, 32);
+      const ringMat = new THREE.MeshBasicMaterial({ color: eff.color, transparent: true, opacity: 0.5 });
+      const ring = new THREE.Mesh(ringGeo, ringMat);
+      ring.rotation.x = Math.PI / 2;
+      ring.position.copy(mesh.position);
+      ring.position.y = ty + 0.3;
+      scene.add(ring);
+
+      collectibles.push({ mesh, ring, effect: eff, baseY: ty + 1.5, collected: false });
+    }
+
+    // Spawn many collectibles
+    for (let i = 0; i < 50; i++) {
+      const x = Math.random() * 200 - 100;
+      const z = Math.random() * 200 - 100;
+      spawnCollectible(x, z);
+    }
+
+    /* ───────── TREES ───────── */
+    function createTree(x, z) {
+      const group = new THREE.Group();
+      const trunkGeo = new THREE.CylinderGeometry(0.2, 0.3, 2, 8);
+      const trunkMat = new THREE.MeshStandardMaterial({ color: 0x8B5A2B });
+      const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+      trunk.position.y = 1;
+      trunk.castShadow = true;
+      group.add(trunk);
+
+      const leafGeo = new THREE.SphereGeometry(1.5, 8, 8);
+      const leafMat = new THREE.MeshStandardMaterial({ color: 0x228B22, flatShading: true });
+      const leaves = new THREE.Mesh(leafGeo, leafMat);
+      leaves.position.y = 3;
+      leaves.castShadow = true;
+      group.add(leaves);
+
+      const ty = getTerrainHeight(x, z);
+      group.position.set(x, ty, z);
+      scene.add(group);
+    }
+    for (let i = 0; i < 40; i++) {
+      const x = Math.random() * 250 - 125;
+      const z = Math.random() * 250 - 125;
+      createTree(x, z);
+    }
+
+    /* ───────── STATE ───────── */
+    let speedMul = 1.0;
+    let jumpPower = 0.18;
+    let gravity = 0.012;
+    let discoMode = false;
+    const baseSpeed = 0.12;
+    let velY = 0;
+    let isGrounded = true;
+    let walkCycle = 0;
+    const charAngle = { current: 0 };
+    const input = { up: false, down: false, left: false, right: false, jump: false };
+
+    /* ───────── NOTIFICATION ───────── */
+    const notifEl = document.getElementById('notification');
+    let notifTimeout = null;
+    function showNotification(text) {
+      notifEl.textContent = text;
+      notifEl.classList.add('show');
+      if (notifTimeout) clearTimeout(notifTimeout);
+      notifTimeout = setTimeout(() => notifEl.classList.remove('show'), 2500);
+    }
+
+    /* ───────── HUD ───────── */
+    const hudSpeed = document.getElementById('hud-speed');
+    const hudEffects = document.getElementById('hud-effects');
+
+    function setCharVisible(v) {
+      charGroup.traverse(c => { if (c.isMesh) c.visible = v; });
+    }
+
+    /* ───────── RANDOM NOTIFICATIONS ───────── */
+    const randomMessages = [
+      'Watch out for cubes!', 'Explore the unknown!', 'Something shiny ahead...',
+      'Keep moving!', 'What is that glow?', 'Adventure awaits!',
+      'Chaos is calling!', 'Look around you!', 'Trust no cube!', 'Jump higher!',
+    ];
+    setInterval(() => {
+      if (Math.random() < 0.4) {
+        showNotification(randomMessages[Math.floor(Math.random() * randomMessages.length)]);
+      }
+    }, 8000);
+
+    /* ───────── INPUT HANDLING ───────── */
+    // Keyboard
+    window.addEventListener('keydown', e => {
+      if (e.code === 'ArrowUp' || e.code === 'KeyW') input.up = true;
+      if (e.code === 'ArrowDown' || e.code === 'KeyS') input.down = true;
+      if (e.code === 'ArrowLeft' || e.code === 'KeyA') input.left = true;
+      if (e.code === 'ArrowRight' || e.code === 'KeyD') input.right = true;
+      if (e.code === 'Space') input.jump = true;
+    });
+    window.addEventListener('keyup', e => {
+      if (e.code === 'ArrowUp' || e.code === 'KeyW') input.up = false;
+      if (e.code === 'ArrowDown' || e.code === 'KeyS') input.down = false;
+      if (e.code === 'ArrowLeft' || e.code === 'KeyA') input.left = false;
+      if (e.code === 'ArrowRight' || e.code === 'KeyD') input.right = false;
+      if (e.code === 'Space') input.jump = false;
+    });
+
+    // Touch / pointer buttons
+    function hookBtn(id, key) {
+      const btn = document.getElementById(id);
+      const onDown = e => { e.preventDefault(); input[key] = true; btn.classList.add('pressed'); };
+      const onUp = e => { e.preventDefault(); input[key] = false; btn.classList.remove('pressed'); };
+      btn.addEventListener('pointerdown', onDown);
+      btn.addEventListener('pointerup', onUp);
+      btn.addEventListener('pointerleave', onUp);
+      btn.addEventListener('pointercancel', onUp);
+    }
+    hookBtn('btn-up', 'up');
+    hookBtn('btn-down', 'down');
+    hookBtn('btn-left', 'left');
+    hookBtn('btn-right', 'right');
+    hookBtn('btn-jump', 'jump');
+
+    /* ───────── RESPAWN COLLECTIBLES ───────── */
+    function respawnCollectible(c) {
+      const x = Math.random() * 200 - 100;
+      const z = Math.random() * 200 - 100;
+      const ty = getTerrainHeight(x, z);
+      const eff = effectTypes[Math.floor(Math.random() * effectTypes.length)];
+      c.effect = eff;
+      c.baseY = ty + 1.5;
+      c.collected = false;
+      c.mesh.position.set(x, ty + 1.5, z);
+      c.mesh.material.color.set(eff.color);
+      c.mesh.material.emissive.set(eff.color);
+      c.mesh.visible = true;
+      c.ring.position.set(x, ty + 0.3, z);
+      c.ring.material.color.set(eff.color);
+      c.ring.visible = true;
+    }
+
+    /* ───────── PARTICLE SYSTEM ───────── */
+    const particles = [];
+    function spawnParticles(pos, color, count = 15) {
+      for (let i = 0; i < count; i++) {
+        const geo = new THREE.SphereGeometry(0.1 + Math.random() * 0.15, 6, 6);
+        const mat = new THREE.MeshBasicMaterial({ color });
+        const p = new THREE.Mesh(geo, mat);
+        p.position.copy(pos);
+        const vel = new THREE.Vector3(
+          (Math.random() - 0.5) * 0.3,
+          Math.random() * 0.2 + 0.1,
+          (Math.random() - 0.5) * 0.3
+        );
+        scene.add(p);
+        particles.push({ mesh: p, vel, life: 1.0 });
+      }
+    }
+
+    /* ───────── GAME LOOP ───────── */
+    const clock = new THREE.Clock();
+
+    function animate() {
+      requestAnimationFrame(animate);
+      const dt = Math.min(clock.getDelta(), 0.05);
+      const t = clock.getElapsedTime();
+
+      // Movement
+      const speed = baseSpeed * speedMul;
+      let moveX = 0, moveZ = 0;
+      if (input.up)    moveZ -= speed;
+      if (input.down)  moveZ += speed;
+      if (input.left)  moveX -= speed;
+      if (input.right) moveX += speed;
+
+      const isMoving = moveX !== 0 || moveZ !== 0;
+
+      if (isMoving) {
+        charAngle.current = Math.atan2(moveX, moveZ);
+        charGroup.rotation.y = charAngle.current;
+      }
+
+      charGroup.position.x += moveX;
+      charGroup.position.z += moveZ;
+
+      // Keep on terrain
+      const terrY = getTerrainHeight(charGroup.position.x, charGroup.position.z);
+
+      // Jump
+      if (input.jump && isGrounded) {
+        velY = jumpPower;
+        isGrounded = false;
+      }
+
+      velY -= gravity;
+      charGroup.position.y += velY;
+
+      if (charGroup.position.y <= terrY) {
+        charGroup.position.y = terrY;
+        velY = 0;
+        isGrounded = true;
+      }
+
+      // Walk animation
+      if (isMoving && isGrounded) {
+        walkCycle += dt * 10 * speedMul;
+        const swing = Math.sin(walkCycle) * 0.4;
+        leftLeg.rotation.x = swing;
+        rightLeg.rotation.x = -swing;
+        leftArm.rotation.x = -swing * 0.8;
+        rightArm.rotation.x = swing * 0.8;
+        // Slight body bob
+        body.position.y = 1.2 + Math.abs(Math.sin(walkCycle)) * 0.08;
+      } else {
+        leftLeg.rotation.x *= 0.9;
+        rightLeg.rotation.x *= 0.9;
+        leftArm.rotation.x *= 0.9;
+        rightArm.rotation.x *= 0.9;
+      }
+
+      // Camera follow
+      const camDist = 8;
+      const camHeight = 5;
+      const idealPos = new THREE.Vector3(
+        charGroup.position.x - Math.sin(charAngle.current) * camDist,
+        charGroup.position.y + camHeight,
+        charGroup.position.z - Math.cos(charAngle.current) * camDist
+      );
+      camera.position.lerp(idealPos, 0.05);
+      const lookTarget = new THREE.Vector3(charGroup.position.x, charGroup.position.y + 2, charGroup.position.z);
+      camera.lookAt(lookTarget);
+
+      // Animate collectibles
+      for (const c of collectibles) {
+        if (c.collected) continue;
+        c.mesh.rotation.y += dt * 2;
+        c.mesh.rotation.x += dt * 0.5;
+        c.mesh.position.y = c.baseY + Math.sin(t * 2 + c.mesh.position.x) * 0.4;
+        c.ring.rotation.z += dt;
+        c.ring.scale.setScalar(1 + Math.sin(t * 3) * 0.1);
+
+        // Collision detection
+        const dist = charGroup.position.distanceTo(c.mesh.position);
+        if (dist < 2.0) {
+          c.collected = true;
+          c.mesh.visible = false;
+          c.ring.visible = false;
+          showNotification(`${c.effect.icon} ${c.effect.name}`);
+          c.effect.apply();
+          spawnParticles(c.mesh.position.clone(), c.effect.color);
+          // Respawn after a delay
+          setTimeout(() => respawnCollectible(c), 6000 + Math.random() * 4000);
+        }
+      }
+
+      // Animate particles
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.mesh.position.add(p.vel);
+        p.vel.y -= 0.005;
+        p.life -= dt * 1.5;
+        p.mesh.material.opacity = p.life;
+        p.mesh.material.transparent = true;
+        if (p.life <= 0) {
+          scene.remove(p.mesh);
+          p.mesh.geometry.dispose();
+          p.mesh.material.dispose();
+          particles.splice(i, 1);
+        }
+      }
+
+      // Animate clouds
+      for (const cloud of clouds) {
+        cloud.position.x += dt * 0.5;
+        if (cloud.position.x > 160) cloud.position.x = -160;
+      }
+
+      // Disco mode
+      if (discoMode) {
+        const r = Math.sin(t * 5) * 0.5 + 0.5;
+        const g = Math.sin(t * 5 + 2) * 0.5 + 0.5;
+        const b = Math.sin(t * 5 + 4) * 0.5 + 0.5;
+        scene.background = new THREE.Color(r, g, b);
+      }
+
+      // Update directional light to follow character
+      dirLight.position.set(charGroup.position.x + 50, 80, charGroup.position.z + 50);
+      dirLight.target.position.copy(charGroup.position);
+      dirLight.target.updateMatrixWorld();
+
+      // HUD
+      hudSpeed.textContent = `Speed: ${speedMul.toFixed(1)}x`;
+      const activeEffects = [];
+      if (speedMul !== 1.0) activeEffects.push(speedMul > 1 ? 'Fast' : 'Slow');
+      if (!charGroup.children[0].visible) activeEffects.push('Invisible');
+      if (charGroup.scale.x > 1.5) activeEffects.push('Giant');
+      if (charGroup.scale.x < 0.6) activeEffects.push('Tiny');
+      if (jumpPower > 0.2) activeEffects.push('Super Jump');
+      if (discoMode) activeEffects.push('Disco');
+      if (gravity < 0.01) activeEffects.push('Low Gravity');
+      hudEffects.textContent = `Effects: ${activeEffects.length ? activeEffects.join(', ') : 'none'}`;
+
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    // Resize
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // Welcome
+    setTimeout(() => showNotification('Welcome to Feature World: Random Chaos Edition!'), 500);
+  </script>
+</body>
+</html>
