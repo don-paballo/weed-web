@@ -1,6 +1,7 @@
 import "./index.css";
 import { Composition, getStaticFiles } from "remotion";
 import { AIVideo, aiVideoSchema } from "./components/AIVideo";
+import { ProxyLabsAd } from "./components/ProxyLabsAd";
 import { FPS, INTRO_DURATION } from "./lib/constants";
 import { getTimelinePath, loadTimelineFromFile } from "./lib/utils";
 
@@ -12,6 +13,15 @@ export const RemotionRoot: React.FC = () => {
 
   return (
     <>
+      <Composition
+        id="proxylabs-ad"
+        component={ProxyLabsAd}
+        fps={30}
+        width={1080}
+        height={1920}
+        durationInFrames={540}
+      />
+
       {timelines.map((storyName) => (
         <Composition
           id={storyName}
